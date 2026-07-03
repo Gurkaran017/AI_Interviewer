@@ -1,0 +1,61 @@
+✅ Fix (just 1 command)
+
+Activate your venv again:
+
+venv311\Scripts\activate
+🔹 After activating
+
+You’ll see:
+
+(venv311) PS C:\Users\gurka\Desktop\ai interviewer\ai-service>
+
+Now run:
+
+pip list
+
+👉 Your packages will be back ✅
+
+🔹 Why this happens (important concept)
+
+👉 Virtual environments are NOT permanent sessions
+
+Every time you:
+
+open new terminal ❌
+restart system ❌
+
+You must:
+
+activate venv again
+🔹 Pro tip (avoid this confusion)
+In VS Code:
+Press Ctrl + Shift + P
+
+Select:
+
+Python: Select Interpreter
+
+Choose:
+
+venv311\Scripts\python.exe
+
+👉 Then VS Code auto-activates it next time
+
+🔹 Quick check command
+where python
+
+👉 Should point to:
+
+...\ai-service\venv311\Scripts\python.exe
+🧠 Simple analogy
+venv = separate room
+activation = entering the room
+
+👉 You reopened terminal = you’re outside the room again
+
+🔹 Step 3: Run again
+python main.py
+
+OR (better way for FastAPI):
+
+uvicorn main:app --reload

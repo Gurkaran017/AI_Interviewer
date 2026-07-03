@@ -1,0 +1,47 @@
+services:
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ai-interviewer-frontend
+    ports:
+      - "5173:5173"
+    env_file:
+      - ./frontend/.env
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+    container_name: ai-interviewer-backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      - ai-service
+
+  ai-service:
+    build:
+      context: ./ai-service
+    container_name: ai-interviewer-ai
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./ai-service/.env
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:
