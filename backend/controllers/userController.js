@@ -3,6 +3,11 @@ import asyncHandler from 'express-async-handler';
 import { OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import s3 from "../config/s3.js";
+import {
+  PutObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -58,6 +63,7 @@ const loginUser = asyncHandler(async (req, res) => {
             name: user.name,
             email: user.email,
             preferredRole: user.preferredRole,
+            profileImage: user.profileImage,
             token: generateToken(user._id),
         });
     } else {
@@ -107,6 +113,7 @@ const googleLogin = asyncHandler(async (req, res) => {
             name: user.name,
             email: user.email,
             preferredRole: user.preferredRole,
+            profileImage: user.profileImage,
             token: generateToken(user._id),
         });
     } else {
@@ -132,28 +139,63 @@ const getUserProfile = asyncHandler(async (req, res) => {
     }
 });
 
-const updateUserProfile=asyncHandler(async(req,res)=>{
-  if(req.user){
-    const user=await User.findById(req.user._id);
-    user.name=req.body.name || user.name;
-    user.email=req.body.email || user.email;
-    user.preferredRole=req.body.preferredRole || user.preferredRole;
-    if(req.body.password){
-        user.password=req.body.password;
+const updateUserProfile = asyncHandler(async (req, res) => {
+    if (!req.user) {
+        res.status(404);
+        throw new Error("User not found");
     }
+
+    const user = await User.findById(req.user._id);
+
+    user.name = req.body.name || user.name;
+    user.email = req.body.email || user.email;
+    user.preferredRole = req.body.preferredRole || user.preferredRole;
+
+    if (req.body.password) {
+        user.password = req.body.password;
+    }
+
+    // Upload image if provided
+    if (req.file) {
+
+        if (user.profileImage) {
+
+            const oldKey = user.profileImage.split(".amazonaws.com/")[1];
+
+            await s3.send(
+                new DeleteObjectCommand({
+                    Bucket: process.env.AWS_BUCKET_NAME,
+                    Key: oldKey,
+                })
+            );
+
+        }
+
+        const fileName = `profiles/${user._id}-${Date.now()}-${req.file.originalname}`;
+
+        await s3.send(
+            new PutObjectCommand({
+                Bucket: process.env.AWS_BUCKET_NAME,
+                Key: fileName,
+                Body: req.file.buffer,
+                ContentType: req.file.mimetype,
+            })
+        );
+
+        user.profileImage =
+            `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+    }
+
     await user.save();
+
     res.status(200).json({
         _id: user._id,
         name: user.name,
         email: user.email,
         preferredRole: user.preferredRole,
+        profileImage: user.profileImage,
         token: generateToken(user._id),
-    })
-  }
-  else{
-    res.status(404);
-    throw new Error("User not found");
-  }
-})
+    });
+});
 
 export { registerUser, loginUser, googleLogin,getUserProfile,updateUserProfile }; 

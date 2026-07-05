@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { toast } from 'react-toastify'
 import { updateProfile, reset } from '../features/auth/authSlice'
+import profileIcon from "../assets/profile-image/profile-icon.jpg";
 
 const ROLES = [
   "MERN Stack Developer",
@@ -27,6 +28,18 @@ const inputBase = 'w-full bg-slate-50 border-2 border-transparent rounded-xl sm:
 const Profile = () => {
   const dispatch = useDispatch();
   const { user, isSuccess, isError, message, isProfileLoading } = useSelector((state) => state.auth);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewImage, setPreviewImage] = useState("");
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+
+    if (!file) return;
+
+    setSelectedFile(file);
+
+    setPreviewImage(URL.createObjectURL(file));
+  };
 
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -37,7 +50,12 @@ const Profile = () => {
   useEffect(() => {
     if (!isError && !isSuccess) return
     if (isError) toast.error(message)
-    if (isSuccess) toast.success('Profile Updated Successfully')
+    if (isSuccess) {
+      toast.success("Profile Updated Successfully");
+
+      setSelectedFile(null);
+      setPreviewImage("");
+    }
     dispatch(reset())
   }, [isError, isSuccess, message, dispatch])
 
@@ -51,6 +69,14 @@ const Profile = () => {
     }
   }, [user])
 
+  useEffect(() => {
+    return () => {
+      if (previewImage) {
+        URL.revokeObjectURL(previewImage);
+      }
+    };
+  }, [previewImage]);
+
   const handleChange = (e) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
@@ -58,11 +84,24 @@ const Profile = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (formData.name === user.name && formData.preferredRole === user.preferredRole) {
-      toast.info('No changes to save.')
-      return
+    if (
+      formData.name === user.name &&
+      formData.preferredRole === user.preferredRole &&
+      !selectedFile
+    ) {
+      toast.info("No changes to save.");
+      return;
     }
-    dispatch(updateProfile(formData))
+    const data = new FormData();
+
+    data.append("name", formData.name);
+    data.append("preferredRole", formData.preferredRole);
+
+    if (selectedFile) {
+      data.append("profileImage", selectedFile);
+    }
+
+    dispatch(updateProfile(data));
   }
   return (
     <div className='max-w-4xl mx-auto px-4 py-6 sm:py-12 pb-24'>
@@ -75,6 +114,26 @@ const Profile = () => {
         </header>
 
         <form onSubmit={handleSubmit} className='space-y-6' >
+
+          <div className="flex flex-col items-center gap-4">
+            <img
+              src={
+                previewImage
+                  ? previewImage
+                  : user?.profileImage
+                    ? user.profileImage
+                    : profileIcon
+              }
+              alt="Profile"
+              className="w-28 h-28 rounded-full object-cover border-4 border-teal-500"
+            />
+
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+            />
+          </div>
 
           <FormField label="Full Name">
             <input

@@ -1,6 +1,27 @@
 import multer from "multer";
 import path from "path";
 
+const imageStorage = multer.memoryStorage();
+
+const imageFilter = (req, file, cb) => {
+
+    if (file.mimetype.startsWith("image/")) {
+        cb(null, true);
+    } else {
+        cb(new Error("Only image files are allowed"), false);
+    }
+
+};
+
+const uploadImage = multer({
+    storage: imageStorage,
+    fileFilter: imageFilter,
+    limits: {
+        fileSize: 5 * 1024 * 1024,
+    },
+});
+
+const uploadSingleImage = uploadImage.single("profileImage");
 
 const storage = multer.diskStorage({
     destination(req, file, cb) {
@@ -29,4 +50,5 @@ const upload = multer({
 });
 
 const uploadSingleAudio = upload.single("audioFile");
-export { uploadSingleAudio };
+
+export { uploadSingleAudio, uploadSingleImage };

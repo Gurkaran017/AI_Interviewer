@@ -27,6 +27,10 @@ const userSchema=mongoose.Schema({
         type:String,
         default:"MERN Stack Developer"
     },
+    profileImage: {
+    type: String,
+    default: ""
+},
 },{
     timestamps:true
 })

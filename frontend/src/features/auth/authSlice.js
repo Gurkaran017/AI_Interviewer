@@ -60,12 +60,13 @@ export const logout=createAsyncThunk('auth/logout',async()=>{
 export const updateProfile=createAsyncThunk('auth/update',async(userData,thunkAPI)=>{
     try{
         const token = thunkAPI.getState().auth.user.token;
-       const config={
-           headers:{
-               Authorization:`Bearer ${token}`
-           }
-       }
-       const response=await axios.put(`${API_URL}profile`,userData,config);
+        const config = {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "multipart/form-data",
+            },
+        };
+        const response=await axios.put(`${API_URL}profile`,userData,config);
        return response.data;
        }catch(error){
         const message=(error.response && error.response.data && error.response.data.message) || error.message || error.toString();
