@@ -1,0 +1,20 @@
+# Node
+backend/node_modules/
+frontend/node_modules/
+
+# Python
+ai-service/venv/
+ai-service/venv311/
+ai-service/__pycache__/
+ai-service/*.pyc
+ai-service/*.pyo
+ai-service/.pytest_cache/
+
+# Environment files
+backend/.env
+frontend/.env
+ai-service/.env
+
+# OS / Editor
+.DS_Store
+.vscode/
