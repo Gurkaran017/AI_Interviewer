@@ -23,6 +23,8 @@ const server = http.createServer(app);
 const allowedOrigin = [
     'http://localhost:5174',
     'http://localhost:5173',
+    'https://evalai01.netlify.app',
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
 ]
 
 const io = new Server(server, {
