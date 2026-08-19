@@ -9,7 +9,6 @@ from pydantic import BaseModel   # request validation & response validation
 from dotenv import load_dotenv
 from typing import Optional  # type hinting for better code clarity and validation
 import ollama
-import whisper
 from pydub import AudioSegment  # audio processing (format conversion, in-memory handling)
 
 load_dotenv()
@@ -25,6 +24,7 @@ print("AI Microservice Starting...")
 print(f"AI_SERVICE_PORT : {AI_SERVICE_PORT}")
 print(f"OLLAMA_HOST     : {OLLAMA_HOST}")
 print(f"OLLAMA_MODEL    : {OLLAMA_MODEL_NAME}")
+print("Whisper loads lazily on first /transcribe (tiny.en, CPU)")
 print("=" * 60)
 
 app=FastAPI(title="AI Interviewer Microservice",version="1.0")
@@ -38,15 +38,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-WHISPER_MODEL=None
+WHISPER_MODEL = None
 
-try:
-    print("Loading Whisper Model ...")
-    WHISPER_MODEL=whisper.load_model("base.en")
-    print("Whisper Model Loaded Successfully")
-except Exception as e:
-    print("Error while loading Whisper Model")
-    print(e)
+
+def get_whisper_model():
+    """Load Whisper only when transcription is requested (keeps Render startup under RAM limit)."""
+    global WHISPER_MODEL
+    if WHISPER_MODEL is None:
+        import whisper  # lazy: importing whisper pulls in torch
+        print("Loading Whisper Model (tiny.en, cpu)...")
+        WHISPER_MODEL = whisper.load_model("tiny.en", device="cpu")
+        print("Whisper Model Loaded Successfully")
+    return WHISPER_MODEL
 
 class QuestionResquest(BaseModel):
     role:str="MERN Stack Developer"
@@ -197,32 +200,32 @@ async def generate_next_question(request:NextQuestionRequest):
     except Exception as e:
         raise HTTPException(status_code=500,detail=str(e))
 @app.post("/transcribe")
-async def transcribe_audio(file:UploadFile=File(...)):
+async def transcribe_audio(file: UploadFile = File(...)):
     print("\n========== TRANSCRIPTION ==========")
     print(f"Filename : {file.filename}")
     print(f"Type     : {file.content_type}")
+    temp_audio_path = None
     try:
-        audio_bytes=await file.read()
+        audio_bytes = await file.read()
         print(f"Audio Size : {len(audio_bytes)} bytes")
-        audio_in_memory=io.BytesIO(audio_bytes)
-        audio_segment=AudioSegment.from_file(audio_in_memory)
-        with tempfile.NamedTemporaryFile(delete=False,suffix=".mp3") as tmp:
-            temp_audio_path=tmp.name
-            audio_segment.export(temp_audio_path,format="mp3")
-        if not WHISPER_MODEL:
-            raise HTTPException(status_code=503,detail="Whisper Model is not loaded")
-        
-        result=WHISPER_MODEL.transcribe(temp_audio_path)
+        audio_in_memory = io.BytesIO(audio_bytes)
+        audio_segment = AudioSegment.from_file(audio_in_memory)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+            temp_audio_path = tmp.name
+            audio_segment.export(temp_audio_path, format="mp3")
+
+        model = get_whisper_model()
+        result = model.transcribe(temp_audio_path, fp16=False)
         print("Transcription completed")
         print(result["text"])
-                
-        os.remove(temp_audio_path)
-        return {"transcription":result["text"].strip()}
+
+        return {"transcription": result["text"].strip()}
 
     except Exception as e:
-        if 'temp_audio_path' in locals() and os.path.exists(temp_audio_path):
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if temp_audio_path and os.path.exists(temp_audio_path):
             os.remove(temp_audio_path)
-        raise HTTPException(status_code=500,detail=str(e))
 
 @app.post("/evaluate",response_model=EvaluationResponse)
 async def evaluate(request:EvaluationRequest):
