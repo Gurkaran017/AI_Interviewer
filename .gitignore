@@ -69,6 +69,12 @@ coverage/
 *.temp
 
 # ===================================
+# Uploads (keep folder, ignore files)
+# ===================================
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ===================================
 # Database Files
 # ===================================
 *.db

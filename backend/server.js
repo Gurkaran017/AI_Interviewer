@@ -1,6 +1,8 @@
 import "./config/env.js";
 import express from "express";
 import http from "http";
+import fs from "fs";
+import path from "path";
 // import dotenv from "dotenv";
 import cors from "cors";
 import { Server } from "socket.io";
@@ -13,6 +15,10 @@ import { notFound, errorHandler } from "./middleware/errorMiddleware.js";
 // dotenv.config();
 console.log(Object.keys(process.env).filter(key => key.includes("AI")));
 console.log("SERVER:", process.env.AI_SERVICE_URL);
+
+const uploadsDir = path.join(process.cwd(), "uploads");
+fs.mkdirSync(uploadsDir, { recursive: true });
+console.log("Uploads directory ready:", uploadsDir);
 
 connectDB();
 
