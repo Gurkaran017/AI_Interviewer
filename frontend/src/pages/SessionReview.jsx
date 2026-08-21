@@ -23,7 +23,8 @@ const getSelectionOdds = (score) => {
     return { label: "Low (Requires Retraining)", color: "text-rose-600", desc: "Based on this session, you are not yet ready for this role. We recommend more practice with the AI." };
 };
 
-const formatIdealAnswer = (text) => {
+const formatIdealAnswer = (text, answered = true) => {
+    if (!answered) return "Question not answered.";
     if (!text || text === "pending") return "Model explanation not generated.";
     try {
         let cleanText = text.trim();
@@ -180,7 +181,10 @@ function SessionReview() {
                                     <div className="space-y-3">
                                         <label className="text-[10px] font-black text-teal-600 uppercase tracking-[0.3em] block ml-2 text-center">AI Ideal Answer</label>
                                         <div className="bg-slate-900 text-slate-400 rounded-[2.5rem] p-8 min-h-[150px] shadow-inner font-mono text-[11px] leading-relaxed overflow-x-auto whitespace-pre-wrap flex items-center">
-                                            {formatIdealAnswer(q.idealAnswer)}
+                                            {formatIdealAnswer(
+                                                q.idealAnswer,
+                                                !!(q.isSubmitted || q.userAnswerText || q.userSubmittedCode)
+                                            )}
                                         </div>
                                     </div>
                                 </div>
