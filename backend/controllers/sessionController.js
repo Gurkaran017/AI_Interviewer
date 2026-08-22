@@ -305,7 +305,8 @@ console.error(error);
                             previous_question: question.questionText,
                             user_answer: question.userAnswerText,
                             user_code: question.userSubmittedCode,
-                            ai_feedback: question.aiFeedback
+                            ai_feedback: question.aiFeedback,
+                            asked_questions: session.questions.map(q => q.questionText).filter(Boolean)
                         }),
                     });
 
@@ -321,9 +322,7 @@ console.error(error);
                         console.log(nextQData);
                     }
                 } catch (e) {
-                    // console.error("Failed to generate next question:", e);
-                    console.error("ERROR:");
-console.error(error);
+                    console.error("Failed to generate next question:", e);
                 }
 
                 // UNIFIED PERSISTENT PAUSE CALCULATION

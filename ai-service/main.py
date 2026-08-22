@@ -2,6 +2,7 @@ import uvicorn  # Similar to node + express
 import os       # file handling
 import io       # in-memory file handling (important for audio)
 import json
+import re
 import tempfile # Temporary file storage (audio processing)
 from fastapi import FastAPI,HTTPException,UploadFile,File
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,6 +66,7 @@ class NextQuestionRequest(BaseModel):
     user_answer:Optional[str]=None
     user_code:Optional[str]=None
     ai_feedback:str
+    asked_questions:Optional[list[str]]=None
 
 
 class QuestionResponse(BaseModel):
@@ -104,10 +106,56 @@ def _as_string(value, default=""):
     return str(value).strip() or default
 
 
+# Interviewer boilerplate that carries no topic meaning ("Can you please explain what ...")
+QUESTION_FILLER_WORDS = {
+    "a", "about", "an", "and", "any", "are", "as", "at", "be", "by", "can", "could",
+    "describe", "did", "do", "does", "for", "from", "give", "how", "i", "if", "in",
+    "is", "it", "its", "me", "of", "on", "one", "or", "please", "provide", "should",
+    "some", "tell", "that", "the", "their", "them", "then", "there", "these", "this",
+    "to", "us", "use", "used", "using", "was", "were", "what", "when", "where",
+    "which", "why", "will", "with", "would", "you", "your",
+}
+
+
+def _stem(word: str) -> str:
+    """Crude suffix stripping so 'define'/'defining'/'defines' collapse to one token."""
+    for suffix in ("ing", "ed", "es", "s"):
+        if len(word) > 4 and word.endswith(suffix):
+            word = word[: -len(suffix)]
+            break
+    if len(word) > 4 and word.endswith("e"):
+        word = word[:-1]
+    return word
+
+
+def _question_tokens(text: str) -> set:
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return {_stem(w) for w in words if w not in QUESTION_FILLER_WORDS}
+
+
+def is_duplicate_question(candidate: str, asked_questions, threshold: float = 0.6) -> bool:
+    """True if candidate repeats a previously asked question's topic."""
+    candidate_tokens = _question_tokens(candidate)
+    if not candidate_tokens:
+        return True
+
+    for asked in asked_questions or []:
+        asked_tokens = _question_tokens(asked)
+        if not asked_tokens:
+            continue
+
+        overlap = len(candidate_tokens & asked_tokens)
+        if overlap / len(candidate_tokens | asked_tokens) >= threshold:
+            return True
+        # One question fully contains the other's topic (just reworded/expanded)
+        if overlap / min(len(candidate_tokens), len(asked_tokens)) >= 0.8:
+            return True
+
+    return False
+
+
 def parse_evaluation_response(response_text: str) -> EvaluationResponse:
     """Parse Ollama JSON robustly; salvage partial fields if JSON is truncated."""
-    import re
-
     text = (response_text or "").strip()
     candidates = [text]
 
@@ -228,9 +276,16 @@ async def generate_questions(request: QuestionResquest):
                 # fallback if single string
         if isinstance(questions, str):
             normalized_questions = [questions]
-                
+
+        unique_questions = []
+        for q in normalized_questions:
+            if is_duplicate_question(q, unique_questions):
+                print(f"Duplicate question dropped from batch: {q}")
+                continue
+            unique_questions.append(q)
+
         return QuestionResponse(
-            questions=normalized_questions[:request.count],
+            questions=unique_questions[:request.count],
             model_used=OLLAMA_MODEL_NAME
         )
 
@@ -241,34 +296,63 @@ async def generate_questions(request: QuestionResquest):
 @app.post("/generate-next-question")
 async def generate_next_question(request:NextQuestionRequest):
     try:
-        system_prompt=(
+        asked_questions = list(request.asked_questions or [])
+        if request.previous_question and request.previous_question not in asked_questions:
+            asked_questions.append(request.previous_question)
+
+        history_block = "\n".join(f"- {q}" for q in asked_questions) or "- (none)"
+
+        base_system_prompt=(
             "You are a professional technical interviewer. "
             "Task: Generate ONE follow-up interview question based on the candidate's last answer. "
-            "If the answer was poor, ask a simpler follow-up. If it was good, challenge them with something advanced. "
+            "If the answer was poor, move to a DIFFERENT and simpler topic. If it was good, challenge them with something advanced. "
+            "CRITICAL: The new question MUST cover a topic that has NOT been asked before. "
+            "Never rephrase, re-ask, or slightly reword an earlier question. "
             "CRITICAL: Do NOT include any conversational filler (e.g. 'Good job!', 'Interesting approach...'). "
             "CRITICAL: Start immediately with the question body. "
             "Respond ONLY with a JSON object: {'question': 'text', 'questionType': 'oral' | 'coding'}"
         )
 
-        user_prompt=(
+        base_user_prompt=(
             f"Role: {request.role}\nLevel: {request.level}\n"
+            f"Questions already asked (do NOT repeat these topics):\n{history_block}\n\n"
             f"Previous Question: {request.previous_question}\n"
             f"Candidate's Answer: {request.user_answer or 'None'}\n"
             f"Candidate's Code: {request.user_code or 'None'}\n"
             f"Evaluation: {request.ai_feedback}\n"
-            "Ask the next question now."
+            "Ask the next question now, on a new topic."
         )
 
-        response = client.generate(
-            model=OLLAMA_MODEL_NAME,
-            prompt=user_prompt,
-            system=system_prompt,
-            format="json",
-            options={"temperature":0.7},
-            )
+        last_result = {"question": "", "questionType": "oral"}
 
-        next_q_data = json.loads(response['response'].strip())
-        return {"question": next_q_data.get('question', ""), "questionType": next_q_data.get('questionType', 'oral')}
+        for attempt, temperature in enumerate((0.7, 0.9, 1.0)):
+            user_prompt = base_user_prompt
+            if attempt > 0:
+                user_prompt += (
+                    f"\n\nYour previous attempt repeated an earlier question: '{last_result['question']}'. "
+                    f"Choose a COMPLETELY DIFFERENT area of {request.role} that shares no keywords with the list above."
+                )
+
+            response = client.generate(
+                model=OLLAMA_MODEL_NAME,
+                prompt=user_prompt,
+                system=base_system_prompt,
+                format="json",
+                options={"temperature":temperature},
+                )
+
+            next_q_data = json.loads(response['response'].strip())
+            last_result = {
+                "question": next_q_data.get('question', ""),
+                "questionType": next_q_data.get('questionType', 'oral'),
+            }
+
+            if not is_duplicate_question(last_result["question"], asked_questions):
+                return last_result
+
+            print(f"Duplicate follow-up rejected (attempt {attempt + 1}): {last_result['question']}")
+
+        return last_result
 
     except Exception as e:
         raise HTTPException(status_code=500,detail=str(e))
