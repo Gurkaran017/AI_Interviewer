@@ -22,6 +22,17 @@ const pushSocketUpdate = (io, userId, sessionId, status, message, session = null
     });
 };
 
+// Fold AI processing time into pauseTimeMS and unlock the clock.
+// Must run on every path that finishes evaluation, otherwise the client stays frozen.
+const releasePause = (session) => {
+    if (session.lastPauseStart) {
+        const processingDuration = Date.now() - new Date(session.lastPauseStart).getTime();
+        session.pauseTimeMS = (session.pauseTimeMS || 0) + processingDuration;
+        session.lastPauseStart = null;
+    }
+    session.isPaused = false;
+};
+
 // @desc    Create a new interview session and start AI question generation
 // @route   POST /api/sessions/
 // @access  Private
@@ -178,9 +189,7 @@ const evaluateAnswerAsync = async (io, userId, sessionId, questionIndex, audioFi
 
     const session = await Session.findById(sessionId);
     if (!session) {
-        // console.error(`Session ${sessionId} not found`);
-        console.error("ERROR:");
-console.error(error);
+        console.error(`Session ${sessionId} not found`);
         return;
     }
 
@@ -275,11 +284,12 @@ console.error(error);
                 avgTechnical: scoreSummary.avgTechnical,
                 avgConfidence: scoreSummary.avgConfidence,
             };
+            releasePause(session);
             await session.save();
             pushSocketUpdate(io, userId, sessionId, 'SESSION_COMPLETED', 'Scores finalized.', session);
         } else {
-            // Check if timer expired based on duration on server side as a fallback
-            const timeElapsed = (new Date() - new Date(session.startTime)) / 60000;
+            // Check if timer expired. Must exclude AI processing time so this matches the client clock.
+            const timeElapsed = (Date.now() - new Date(session.startTime).getTime() - (session.pauseTimeMS || 0)) / 60000;
             if (timeElapsed >= session.duration) {
                 // Time is up, finish session
                 const scoreSummary = await calculateOverallScore(sessionId);
@@ -287,6 +297,7 @@ console.error(error);
                 session.metrics = { avgTechnical: scoreSummary.avgTechnical, avgConfidence: scoreSummary.avgConfidence };
                 session.status = 'completed';
                 session.endTime = new Date();
+                releasePause(session);
                 await session.save();
                 pushSocketUpdate(io, userId, sessionId, 'SESSION_COMPLETED', 'Time is up. Scores finalized.', session);
             } else {
@@ -325,12 +336,7 @@ console.error(error);
                     console.error("Failed to generate next question:", e);
                 }
 
-                // UNIFIED PERSISTENT PAUSE CALCULATION
-                if (session.lastPauseStart) {
-                    const processingDuration = Date.now() - new Date(session.lastPauseStart).getTime();
-                    session.pauseTimeMS = (session.pauseTimeMS || 0) + processingDuration;
-                }
-                session.isPaused = false; 
+                releasePause(session);
 
                 await session.save();
                 pushSocketUpdate(io, userId, sessionId, 'NEW_QUESTION', `Feedback ready and new question available.`, session);
@@ -338,10 +344,8 @@ console.error(error);
         }
 
     } catch (error) {
-        // console.error(`Evaluation Error: ${error.message}`);
-        console.error("ERROR:");
-console.error(error);
-        session.isPaused = false; // Always unlock on failure
+        console.error("Evaluation Error:", error);
+        releasePause(session); // Always unlock on failure
         await session.save();
         pushSocketUpdate(io, userId, sessionId, 'EVALUATION_FAILED', `Evaluation failed.`, session);
     }
@@ -483,6 +487,7 @@ const endSession = asyncHandler(async (req, res) => {
         avgTechnical: scoreSummary.avgTechnical,
         avgConfidence: scoreSummary.avgConfidence,
     };
+    releasePause(session);
 
     await session.save();
 

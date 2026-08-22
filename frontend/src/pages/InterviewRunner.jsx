@@ -1,5 +1,5 @@
 // frontend/src/pages/InterviewRunner.jsx
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getSessionById, submitAnswer, endSession, socketUpdateSession, startSession } from '../features/sessions/sessionSlice';
@@ -80,12 +80,16 @@ function InterviewRunner() {
   const isLocallySubmitted = submittedLocal[currentQuestionIndex] === true;
   const isQuestionLocked = isReduxSubmitted || isLocallySubmitted;
 
+  const isSessionOver = activeSession?.status === 'completed';
+
   const isWaitingForAI = useMemo(() => {
+     // A finished session never gets another question, so never wait on one.
+     if (isSessionOver) return false;
      if (!isQuestionLocked) return false;
      if (!currentQuestion?.isEvaluated) return true;
      if (activeSession?.questions?.length <= currentQuestionIndex + 1) return true;
      return false;
-  }, [isQuestionLocked, currentQuestion?.isEvaluated, activeSession?.questions?.length, currentQuestionIndex]);
+  }, [isSessionOver, isQuestionLocked, currentQuestion?.isEvaluated, activeSession?.questions?.length, currentQuestionIndex]);
 
   // SOCKET: Real-time update listener
   useEffect(() => {
@@ -294,21 +298,29 @@ function InterviewRunner() {
     });
   };
 
-  const terminateInterview = () => {
+  const concludeInterview = useCallback(() => {
     setIsTerminated(true);
     window.speechSynthesis.cancel();
     if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});
-    
+
     // STOP CAMERA TRACKS IMMEDIATELY
     if (videoStreamRef.current) {
         videoStreamRef.current.getTracks().forEach(track => track.stop());
         videoStreamRef.current = null;
     }
+    localStorage.removeItem(`drafts_${sessionId}`);
+  }, [sessionId]);
 
-    dispatch(endSession(sessionId)).unwrap().then(() => {
-        localStorage.removeItem(`drafts_${sessionId}`);
-    });
+  const terminateInterview = () => {
+    concludeInterview();
+    dispatch(endSession(sessionId));
   };
+
+  // The server can end the session on its own (time expired). Without this the UI
+  // would keep waiting for a question that is never coming.
+  useEffect(() => {
+    if (isSessionOver && !isTerminated) concludeInterview();
+  }, [isSessionOver, isTerminated, concludeInterview]);
 
   const currentDraft = drafts[currentQuestionIndex] || {};
 
